@@ -22,6 +22,8 @@ pip install fastapi-cli
 
 # Define your OpenAI API keys:
 export OPENAI_API_KEY="not-a-real-api-key"
+# OR
+export SELF_HOSTED="true"
 
 # Serve:
 fastapi dev

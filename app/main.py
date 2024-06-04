@@ -10,16 +10,23 @@ from pydantic import BaseModel, Field
 from pydantic_core import from_json
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
-import openai
-API_KEY = os.environ.get("OPENAI_API_KEY", None)
-
 from guardrails.hub import RegexMatch
 from guardrails import Guard
 
 
-# Models:
-processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
-model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
+# Self-hosted Models:
+SELF_HOSTED = os.environ.get("SELF_HOSTED", "false").lower() == "true"
+if SELF_HOSTED:
+    global processor
+    global model
+    MODEL_NAME = "microsoft/trocr-base-printed"
+    processor = TrOCRProcessor.from_pretrained(MODEL_NAME)
+    model = VisionEncoderDecoderModel.from_pretrained(MODEL_NAME)
+
+# Non-self-hosted Model
+API_KEY = os.environ.get("OPENAI_API_KEY", None)
+if API_KEY is not None:
+    import openai
 
 # Basic Validators:
 QUANTITY_REGEX = "\(?\d+x?\)?"
@@ -40,8 +47,10 @@ guard = Guard.from_pydantic(Receipt)
 
 app = FastAPI()
 
-@app.post("/scan")
+@app.post("/scan-trocr")
 async def scan_trocr(image: UploadFile):
+    if not SELF_HOSTED:
+        raise Exception("SELF_HOSTED is not set to 'true' in the environment. Models are not loaded.")
     image = Image.open(image.file).convert("RGB")
     pixel_values = processor(image, return_tensors="pt").pixel_values
     generated_ids = model.generate(pixel_values)
@@ -52,6 +61,8 @@ async def scan_trocr(image: UploadFile):
 
 @app.post("/scan-openai")
 def scan_openai(image: UploadFile) -> Receipt:
+    if API_KEY is None:
+        raise Exception("OPENAI_API_KEY is not defined in your environment. Please set it.")
     encoded_image = base64.b64encode(image.file.read()).decode("utf-8")
     headers = {
       "Content-Type": "application/json",
@@ -86,7 +97,6 @@ def scan_openai(image: UploadFile) -> Receipt:
         response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
         print(f"DEBUG openai response: {response.json()}")
         response = response.json()['choices'][0]['message']['content']
-        #response = """```json\n{\n    "items": [\n {\n "text": "Generic Services",\n "quantity": "1x",\n "price": "$30.00"\n },\n {\n "text": "Some other item",\n "quantity": "2x",\n"price": "$5.30"\n }\n    ],\n "raw_text": "Fake Receipt\\nGeneric Services 1x $30.00\\nSome other item 2x $5.30\\nTotal $35.30"\n}\n```"""
         response = response.strip("```json\n")
         response = response.strip("```")
         return response
