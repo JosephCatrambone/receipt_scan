@@ -43,7 +43,8 @@ class Receipt(BaseModel):
     raw_text: str = Field(default="", description="The full extracted text.")
 
 # Guards:
-guard = Guard.from_pydantic(Receipt)
+prompt = """Please scan the attached receipt and return a JSON object with the item names, quantities, and costs.  ${gr.complete_json_suffix_v2}"""
+guard = Guard.from_pydantic(output_class=Receipt, prompt=prompt)
 
 app = FastAPI()
 
@@ -91,23 +92,19 @@ def scan_openai(image: UploadFile) -> Receipt:
               ]
             }
           ],
-          "max_tokens": 500
+          "max_tokens": 500,
+          "temperature": 0
         }
-
         response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-        print(f"DEBUG openai response: {response.json()}")
-        response = response.json()['choices'][0]['message']['content']
+        response = response.json()
+        response = response['choices'][0]['message']['content']
         response = response.strip("```json\n")
         response = response.strip("```")
         return response
-    prompt = """Please scan the attached receipt and return a JSON object with the item names, quantities, and costs.  ${gr.complete_json_suffix_v2}"""
-    guard = Guard.from_pydantic(output_class=Receipt, prompt=prompt)
 
-    validated_output = Receipt(items=[], raw_text="")
-    validated_output, *rest = guard(
-        llm_api=call_openai,
-    )
-    print(f"DEBUG validated_output: {validated_output}")
-    result = Receipt.model_validate(from_json(validated_output, allow_partial=True))
-    return result
+    # This is a little redundant: it double-validates the returned structure, but might be useful for a model that returns partial data.
+    #validated_output, *rest = guard(llm_api=call_openai,)
+    #return Receipt.model_validate(from_json(validated_output, allow_partial=True))
+    _raw_model_out, validated_output, *rest = guard(llm_api=call_openai,)
+    return Receipt.parse_obj(validated_output)
 
