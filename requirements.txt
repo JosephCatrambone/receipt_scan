@@ -1,0 +1,8 @@
+fastapi
+guardrails-ai>=0.4
+huggingface-hub
+transformers
+torch
+openai
+pillow
+python-multipart
